@@ -4,17 +4,26 @@
   "private": true,
   "scripts": {
     "build": "next build",
+    "vercel-build": "prisma generate && next build",
     "dev": "next dev",
     "dev:3000": "cross-env NEXT_DIST_DIR=.next-3000 next dev -p 3000",
     "dev:3001": "cross-env NEXT_DIST_DIR=.next-3001 next dev -p 3001",
     "dev:3002": "cross-env NEXT_DIST_DIR=.next-3002 next dev -p 3002",
     "lint": "eslint .",
     "start": "next start",
+    "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "seed:pincode": "npx tsx scripts/seed-pincode.ts"
+  },
+  "pnpm": {
+    "patchedDependencies": {},
+    "allowedScripts": {
+      "@prisma/client": true,
+      "prisma": true
+    }
   },
   "dependencies": {
     "@google-cloud/storage": "^7.7.0",
