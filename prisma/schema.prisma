@@ -1,0 +1,420 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "cockroachdb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    BigInt                 @id @default(autoincrement())
+  name                  String?
+  email                 String?                @unique
+  phone                 String?                @unique
+  passwordHash          String?
+  role                  String                 @default("customer") // customer, delivery_partner, admin, super_admin
+  deviceFingerprint     String? // Device fingerprint to prevent multiple accounts
+  ipAddress             String? // IP address at signup
+  isActive              Boolean                @default(true)
+  isSuspended           Boolean                @default(false)
+  suspensionReason      String?
+  failedLoginAttempts   Int                    @default(0)
+  lockedUntil           DateTime? // Account lockout until this time
+  scheduledDeletionAt   DateTime? // Scheduled deletion date (30 days after account deletion request)
+  createdAt             DateTime               @default(now())
+  lastLoginAt           DateTime?
+  addresses             Address[]
+  wallet                Wallet?
+  orders                Order[]
+  passwordResetTokens   PasswordResetToken[]
+  phoneNumberChangeOTPs PhoneNumberChangeOTP[]
+  loginLogs             LoginLog[]
+  ownedDarkStores       DarkStore[] @relation("DarkStoreOwner") // Dark stores owned by this user
+}
+
+model Wallet {
+  id      BigInt              @id @default(autoincrement())
+  user    User                @relation(fields: [userId], references: [id])
+  userId  BigInt              @unique
+  balance BigInt              @default(0) // paise
+  txns    WalletTransaction[]
+}
+
+model WalletTransaction {
+  id        BigInt   @id @default(autoincrement())
+  wallet    Wallet   @relation(fields: [walletId], references: [id])
+  walletId  BigInt
+  amount    BigInt
+  type      String
+  reference String?
+  createdAt DateTime @default(now())
+}
+
+model Address {
+  id        BigInt  @id @default(autoincrement())
+  user      User    @relation(fields: [userId], references: [id])
+  userId    BigInt
+  line1     String
+  pincode   String
+  floor     Int
+  isDefault Boolean @default(false)
+  orders    Order[]
+}
+
+model Product {
+  id                   BigInt   @id @default(autoincrement())
+  title                String
+  description          String?
+  productType          String // "20L_jar", "10L_jar", "water_dispenser"
+  imageUrl             String? // GCS image URL
+  priceCents           BigInt // Price in paise
+  securityDepositCents BigInt? // Security deposit in paise (for jars and dispensers)
+  isAvailable          Boolean  @default(true)
+  isOneTimePurchase    Boolean  @default(false) // If true, no security deposit required
+  volumeMl             Int? // For jars (20000 for 20L, 10000 for 10L)
+  brand                String?
+  deliveryCommissionCents BigInt? // Commission per unit for delivery partner (null = use default from site settings)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  orders               Order[]
+  darkStoreInventoryTransactions DarkStoreInventoryTransaction[]
+  darkStoreProducts    DarkStoreProduct[]
+}
+
+model Order {
+  id                             BigInt     @id @default(autoincrement())
+  user                           User       @relation(fields: [userId], references: [id])
+  userId                         BigInt
+  address                        Address    @relation(fields: [addressId], references: [id])
+  addressId                      BigInt
+  product                        Product    @relation(fields: [productId], references: [id])
+  productId                      BigInt
+  qty                            Int
+  securityDepositCents           BigInt? // Security deposit for this order
+  floorChargeCents               BigInt
+  floorChargeWaivedCents         BigInt? // Amount of floor charge waived/cancelled (as discount)
+  deliveryPartnerCommissionCents BigInt     @default(0) // Commission paid to delivery partner for this order (varies by product)
+  darkStoreEarningsCents         BigInt     @default(0) // Earnings for dark store owner (per jar rate if payment model is per_jar)
+  baseTotalCents                 BigInt
+  surgeMultiplier                Float      @default(1)
+  promoCode                      PromoCode? @relation(fields: [promoCodeId], references: [id])
+  promoCodeId                    BigInt?
+  discountCents                  BigInt? // Discount amount in paise
+  finalTotalCents                BigInt
+  paymentMethod                  String     @default("cod") // cod, upi, wallet
+  paymentStatus                  String     @default("pending") // pending, paid, failed, verified, unverified
+  utrNumber                      String? // UTR number for UPI payments
+  paymentVerified                Boolean    @default(false)
+  paymentVerifiedBy              BigInt? // Admin/Super admin user ID who verified
+  paymentVerifiedAt              DateTime?
+  orderStatus                    String     @default("created")
+  deliveryPersonId               BigInt?
+  darkStoreId                    BigInt? // Dark store assigned for this order
+  darkStore                      DarkStore? @relation(fields: [darkStoreId], references: [id])
+  isOwnerDelivered               Boolean    @default(false) // If dark store owner delivered this order
+  specialInstructions            String?
+  placedAt                       DateTime   @default(now())
+  deliveredAt                    DateTime?
+}
+
+model BlogPost {
+  id              BigInt    @id @default(autoincrement())
+  title           String
+  slug            String    @unique
+  excerpt         String?
+  content         String // HTML content
+  featuredImage   String?
+  authorId        BigInt?
+  authorName      String?
+  status          String    @default("draft") // draft, published, archived
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  views           BigInt    @default(0)
+  // SEO Fields
+  metaTitle       String?
+  metaDescription String?
+  metaKeywords    String?
+  ogTitle         String?
+  ogDescription   String?
+  ogImage         String?
+  canonicalUrl    String?
+  schemaMarkup    String? // JSON-LD structured data
+  focusKeyword    String? // Primary SEO keyword
+  seoScore        Int? // SEO score out of 100
+}
+
+model Popup {
+  id             BigInt    @id @default(autoincrement())
+  title          String
+  content        String // HTML content
+  type           String    @default("info") // info, warning, success, promotion
+  position       String    @default("center") // center, top, bottom
+  isActive       Boolean   @default(true)
+  showOnAllPages Boolean   @default(true)
+  targetPages    String? // JSON array of page paths
+  targetRoles    String? // JSON array of user roles (all, customer, delivery_partner, admin)
+  startDate      DateTime?
+  endDate        DateTime?
+  showOnce       Boolean   @default(false) // Show only once per user
+  buttonText     String?
+  buttonLink     String?
+  imageUrl       String?
+  createdBy      BigInt? // Admin user ID
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  views          BigInt    @default(0)
+  dismissals     BigInt    @default(0)
+}
+
+model Notification {
+  id            BigInt    @id @default(autoincrement())
+  title         String
+  message       String
+  type          String    @default("info") // info, success, warning, error, promotion
+  targetType    String    @default("all") // all, role, user
+  targetRoles   String? // JSON array of roles
+  targetUserIds String? // JSON array of user IDs
+  isRead        Boolean   @default(false)
+  userId        BigInt? // For user-specific notifications
+  link          String? // Optional link to navigate
+  imageUrl      String?
+  priority      String    @default("normal") // low, normal, high, urgent
+  expiresAt     DateTime?
+  createdBy     BigInt? // Admin user ID
+  createdAt     DateTime  @default(now())
+  readAt        DateTime?
+}
+
+model SiteSettings {
+  id                                        BigInt   @id @default(autoincrement())
+  // Hero Section
+  heroTitle                                 String?
+  heroSubtitle                              String?
+  heroDescription                           String?
+  heroImageUrl                              String?
+  heroButtonText                            String?
+  heroButtonLink                            String?
+  // Meta Tags
+  siteTitle                                 String?
+  siteDescription                           String?
+  siteKeywords                              String?
+  faviconUrl                                String?
+  ogImageUrl                                String?
+  // Contact Info
+  contactPhone                              String?
+  contactEmail                              String?
+  contactAddress                            String?
+  // Social Media
+  facebookUrl                               String?
+  twitterUrl                                String?
+  instagramUrl                              String?
+  // Other Settings
+  footerCopyright                           String?
+  upiId                                     String? // UPI ID for payments (e.g., paniwalaa01@paytm)
+  // Floor Charge Settings
+  floorChargeEnabled                        Boolean  @default(true) // Enable/disable floor charge
+  floorChargePerFloorCents                  BigInt   @default(500) // Charge per floor in paise (₹5 = 500 paise)
+  // Delivery Partner Commission Settings
+  defaultDeliveryPartnerCommissionCents     BigInt   @default(1000) // Default commission per product unit in paise (₹10 = 1000 paise) - used when product doesn't have specific commission
+  // Dark Store Owner Commission Settings
+  darkStoreOwnerSelfDeliveryCommissionCents BigInt   @default(1000) // Extra commission for owner self-delivery in paise (₹10 = 1000 paise)
+  updatedAt                                 DateTime @updatedAt
+  updatedBy                                 BigInt? // Admin user ID
+}
+
+model ContactSubmission {
+  id        BigInt    @id @default(autoincrement())
+  name      String
+  email     String
+  phone     String?
+  subject   String
+  message   String
+  ipAddress String? // For security tracking
+  userAgent String? // Browser/device info
+  isRead    Boolean   @default(false)
+  isSpam    Boolean   @default(false)
+  spamScore Float? // Spam detection score (0-1)
+  readAt    DateTime?
+  readBy    BigInt? // Admin user ID who read it
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model EmailSettings {
+  id           BigInt   @id @default(autoincrement())
+  smtpHost     String?  @default("smtp.gmail.com")
+  smtpPort     Int?     @default(465)
+  smtpSecure   Boolean  @default(true) // SSL/TLS
+  smtpEmail    String? // Gmail address
+  smtpPassword String? // App password (encrypted in production)
+  fromName     String?  @default("Paniwalaa")
+  fromEmail    String? // Default from email
+  emailFooter  String? // Custom email footer HTML
+  updatedAt    DateTime @updatedAt
+  updatedBy    BigInt? // Admin user ID
+}
+
+model PasswordResetToken {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  code      String // 6-digit verification code
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model PhoneNumberChangeOTP {
+  id             BigInt   @id @default(autoincrement())
+  userId         BigInt
+  user           User     @relation(fields: [userId], references: [id])
+  newPhoneNumber String // New phone number to be verified
+  code           String // 6-digit verification code
+  expiresAt      DateTime
+  used           Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
+
+model LoginLog {
+  id                BigInt   @id @default(autoincrement())
+  userId            BigInt
+  user              User     @relation(fields: [userId], references: [id])
+  email             String?
+  phone             String?
+  role              String
+  ipAddress         String?
+  userAgent         String?
+  deviceFingerprint String?
+  loginStatus       String // success, failed, blocked
+  failureReason     String? // Reason for failed login
+  location          String? // City/Country if available
+  createdAt         DateTime @default(now())
+}
+
+model PromoCode {
+  id                  BigInt   @id @default(autoincrement())
+  code                String   @unique // Promo code (e.g., "SAVE20")
+  description         String? // Description of the promo
+  discountType        String // "percentage" or "fixed"
+  discountValue       BigInt // Discount value (percentage or amount in paise)
+  minOrderAmountCents BigInt? // Minimum order amount to use this code
+  maxDiscountCents    BigInt? // Maximum discount amount (for percentage)
+  maxUses             Int? // Maximum number of times this code can be used
+  usedCount           Int      @default(0) // Number of times used
+  maxUsesPerUser      Int? // Maximum uses per user
+  validFrom           DateTime // Code valid from date
+  validUntil          DateTime // Code valid until date
+  isActive            Boolean  @default(true)
+  applicableRoles     String? // Comma-separated roles (customer, delivery_partner, etc.)
+  createdBy           BigInt? // Super admin user ID
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  orders              Order[]
+}
+
+model DeliverablePincode {
+  id                       BigInt     @id @default(autoincrement())
+  pincode                  String     @unique // 6-digit pincode
+  areaName                 String? // Area/locality name
+  city                     String? // City name
+  state                    String? // State name
+  isActive                 Boolean    @default(true)
+  deliveryChargeCents      BigInt? // Custom delivery charge for this pincode (in paise)
+  estimatedDeliveryMinutes Int? // Estimated delivery time in minutes
+  notes                    String? // Additional notes
+  darkStoreId              BigInt? // Linked dark store
+  darkStore                DarkStore? @relation(fields: [darkStoreId], references: [id])
+  createdBy                BigInt? // Super admin user ID
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+}
+
+model DarkStore {
+  id                    BigInt                          @id @default(autoincrement())
+  name                  String // Dark store name
+  address               String // Full address
+  pincode               String // Pincode where dark store is located
+  latitude              Float? // Latitude for location
+  longitude             Float? // Longitude for location
+  phone                 String? // Contact phone
+  email                 String? // Contact email
+  // Owner Details
+  ownerName             String // Owner name
+  ownerPhone            String // Owner phone
+  ownerEmail            String? // Owner email
+  ownerAddress          String? // Owner address
+  ownerUserId           BigInt? // User ID if owner is registered as delivery partner (for self-delivery)
+  owner                 User?   @relation("DarkStoreOwner", fields: [ownerUserId], references: [id])
+  // Payment Model
+  paymentModel          String                          @default("per_jar") // "rent" or "per_jar"
+  rentAmountCents       BigInt? // Monthly rent in paise (if paymentModel is "rent")
+  perJarRateCents       BigInt                          @default(500) // Per jar rate in paise (₹5 = 500 paise)
+  // Self Delivery
+  ownerSelfDelivery     Boolean                         @default(false) // Owner can deliver
+  // Inventory
+  currentInventory      Int                             @default(0) // Current number of jars in stock
+  maxStockCapacity      Int // Maximum jars that can be stored
+  lowStockThreshold     Int // Alert when stock goes below this
+  // Management
+  managerId             BigInt? // Admin/Super admin user ID managing this store
+  // Settings
+  deliveryRadiusKm      Float                           @default(3.0) // Delivery radius in km (max 3 km)
+  isActive              Boolean                         @default(true)
+  notes                 String? // Additional notes
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
+  // Relations
+  pincodes              DeliverablePincode[]
+  inventoryTransactions DarkStoreInventoryTransaction[]
+  deliveryPartners      DarkStoreDeliveryPartner[]
+  orders                Order[]
+  products              DarkStoreProduct[] // Product-specific inventory
+}
+
+model DarkStoreProduct {
+  id                BigInt    @id @default(autoincrement())
+  darkStore         DarkStore @relation(fields: [darkStoreId], references: [id], onDelete: Cascade)
+  darkStoreId       BigInt
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId         BigInt
+  currentStock      Int       @default(0) // Current stock of this product in this dark store
+  maxStockCapacity  Int       // Maximum stock capacity for this product
+  lowStockThreshold Int       // Alert when stock goes below this
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([darkStoreId, productId]) // One entry per product per dark store
+  @@index([darkStoreId])
+  @@index([productId])
+}
+
+model DarkStoreInventoryTransaction {
+  id          BigInt    @id @default(autoincrement())
+  darkStore   DarkStore @relation(fields: [darkStoreId], references: [id])
+  darkStoreId BigInt
+  product     Product?  @relation(fields: [productId], references: [id])
+  productId   BigInt?   // Product ID (20L jar, 10L jar, etc.)
+  type        String // "stock_in", "stock_out", "order_deduction", "adjustment"
+  quantity    Int // Quantity change (positive for stock_in, negative for stock_out)
+  stockBefore Int // Stock before transaction
+  stockAfter  Int // Stock after transaction
+  reason      String? // Reason/notes for the transaction
+  orderId     BigInt? // Order ID if type is "order_deduction"
+  createdBy   BigInt? // User ID who created this transaction
+  createdAt   DateTime  @default(now())
+}
+
+model DarkStoreDeliveryPartner {
+  id                BigInt    @id @default(autoincrement())
+  darkStore         DarkStore @relation(fields: [darkStoreId], references: [id])
+  darkStoreId       BigInt
+  deliveryPartnerId BigInt // User ID of delivery partner
+  pincodes          String? // JSON array of pincodes this partner can deliver to from this store
+  isActive          Boolean   @default(true)
+  assignedBy        BigInt? // Admin/Super admin user ID who assigned
+  assignedAt        DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
